@@ -17,11 +17,11 @@ from typing import List, Optional, Literal
 
 import bcrypt
 import jwt
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 
 import face_service
 
@@ -37,6 +37,9 @@ bearer = HTTPBearer(auto_error=False)
 
 JWT_ALGO = "HS256"
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-please-32-chars-minimum-xxx")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("attendance")
 
 
 def hash_pw(pw: str) -> str:
@@ -129,7 +132,7 @@ class SessionCreate(BaseModel):
     semester: str
     division: str
     lecture: str
-    time_from: str  # "HH:MM"
+    time_from: str
     time_to: str
 
 
@@ -236,6 +239,7 @@ async def login_student(payload: StudentLogin):
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current)):
+    user.pop("embeddings", None)
     return user
 
 
@@ -287,7 +291,7 @@ async def create_session(payload: SessionCreate, user: dict = Depends(require_te
         "time_from": payload.time_from,
         "time_to": payload.time_to,
         "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        "status": "open",  # open | completed
+        "status": "open",
         "attendance": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -310,6 +314,33 @@ async def get_session(session_id: str, user: dict = Depends(require_teacher)):
     return s
 
 
+@api.get("/sessions/{session_id}/students")
+async def session_students(session_id: str, user: dict = Depends(require_teacher)):
+    """Return all enrolled students (sem+div) for this session, with face status."""
+    s = await db.sessions.find_one({"id": session_id, "teacher_id": user["id"]})
+    if not s:
+        raise HTTPException(404, "Session not found")
+    cur = db.students.find(
+        {"semester": s["semester"], "division": s["division"]},
+        {"_id": 0, "password_hash": 0, "embeddings": 0},
+    ).sort("roll_number", 1)
+    students = await cur.to_list(5000)
+    return students
+
+
+@api.put("/sessions/{session_id}/reopen")
+async def reopen_session(session_id: str, user: dict = Depends(require_teacher)):
+    """Reopen a completed session so teacher can edit attendance."""
+    s = await db.sessions.find_one({"id": session_id, "teacher_id": user["id"]})
+    if not s:
+        raise HTTPException(404, "Session not found")
+    await db.sessions.update_one(
+        {"id": session_id},
+        {"$set": {"status": "open"}, "$unset": {"completed_at": ""}},
+    )
+    return {"ok": True}
+
+
 @api.post("/sessions/{session_id}/recognize")
 async def recognize(
     session_id: str, payload: RecognizeRequest,
@@ -319,7 +350,6 @@ async def recognize(
     if not sess:
         raise HTTPException(404, "Session not found")
 
-    # Load eligible students (same semester + division) with face embeddings
     cursor = db.students.find(
         {"semester": sess["semester"], "division": sess["division"],
          "face_registered": True},
@@ -329,15 +359,14 @@ async def recognize(
     if not students:
         raise HTTPException(400, "No registered students with face data for this class.")
 
-    # Run detection on each image, then match
     matched_ids = set()
-    match_details = {}  # student_id -> best_sim
+    match_details = {}
     total_detected = 0
     for b64 in payload.images_base64:
         try:
             faces = face_service.detect_and_embed(b64)
-        except Exception as e:
-            logging.exception("detect_and_embed failed")
+        except Exception:
+            logger.exception("detect_and_embed failed")
             continue
         total_detected += len(faces)
         for face in faces:
@@ -354,7 +383,6 @@ async def recognize(
                     match_details[sid_] = sim
                 matched_ids.add(sid_)
 
-    # Build response: all students in class with status
     result = []
     for s in students:
         is_present = s["id"] in matched_ids
@@ -384,10 +412,8 @@ async def save_attendance(
     if not sess:
         raise HTTPException(404, "Session not found")
 
-    # Normalize entries to dicts (handles both Pydantic models and dicts).
-    raw = payload.entries
     entries = []
-    for e in raw:
+    for e in payload.entries:
         if hasattr(e, "model_dump"):
             entries.append(e.model_dump())
         elif isinstance(e, dict):
@@ -398,11 +424,9 @@ async def save_attendance(
     now = datetime.now(timezone.utc).isoformat()
     await db.sessions.update_one(
         {"id": session_id},
-        {"$set": {"attendance": entries, "status": "completed",
-                  "completed_at": now}},
+        {"$set": {"attendance": entries, "status": "completed", "completed_at": now}},
     )
 
-    # Also write to attendance collection for per-student history
     await db.attendance.delete_many({"session_id": session_id})
     rows = []
     for e in entries:
@@ -422,7 +446,8 @@ async def save_attendance(
     if rows:
         await db.attendance.insert_many(rows)
 
-    # Create in-app notifications
+    # Replace notifications for this session (so edits don't duplicate).
+    await db.notifications.delete_many({"session_id": session_id})
     notes = []
     for e in entries:
         title = f"Attendance: {sess['lecture']}"
@@ -487,7 +512,6 @@ async def root():
     return {"message": "AI Attendance System API", "status": "ok"}
 
 
-# --- Indexes + startup ---
 @app.on_event("startup")
 async def startup():
     await db.teachers.create_index("email", unique=True)
@@ -495,7 +519,6 @@ async def startup():
     await db.sessions.create_index([("teacher_id", 1), ("created_at", -1)])
     await db.attendance.create_index([("student_id", 1), ("date", -1)])
     await db.notifications.create_index([("student_id", 1), ("created_at", -1)])
-    # Warm up face model in background (non-blocking)
     try:
         face_service.get_face_app()
         logger.info("InsightFace model loaded")
@@ -512,9 +535,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("attendance")
 
 
 @app.on_event("shutdown")
