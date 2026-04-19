@@ -33,8 +33,30 @@
           "resizeMode": "contain",
           "backgroundColor": "#000"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow photo access to register your face and attendance images",
+          "cameraPermission": "Take selfies for face registration and classroom photos"
+        }
       ]
     ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take selfies and classroom photos",
+        "NSPhotoLibraryUsageDescription": "Pick images for face registration"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+    },
     "experiments": {
       "typedRoutes": true
     }
