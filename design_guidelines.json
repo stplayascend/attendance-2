@@ -1,0 +1,175 @@
+{
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "emotional_tone": "Professional, Clear, and Trustworthy",
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "Manrope",
+    "scales": {
+      "h1": {
+        "fontSize": 32,
+        "lineHeight": 40,
+        "letterSpacing": -0.5,
+        "fontWeight": "700"
+      },
+      "h2": {
+        "fontSize": 24,
+        "lineHeight": 32,
+        "letterSpacing": -0.3,
+        "fontWeight": "600"
+      },
+      "h3": {
+        "fontSize": 20,
+        "lineHeight": 28,
+        "fontWeight": "600"
+      },
+      "body": {
+        "fontSize": 16,
+        "lineHeight": 24,
+        "fontWeight": "400"
+      },
+      "label": {
+        "fontSize": 12,
+        "lineHeight": 16,
+        "letterSpacing": 1.2,
+        "textTransform": "uppercase",
+        "fontWeight": "700"
+      }
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F8FAFC",
+      "tertiary": "#F1F5F9"
+    },
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#475569",
+      "inverse": "#FFFFFF"
+    },
+    "brand": {
+      "primary": "#1D4ED8",
+      "primaryHover": "#1E3A8A",
+      "accent": "#3B82F6"
+    },
+    "status": {
+      "present": "#10B981",
+      "absent": "#EF4444",
+      "warning": "#F59E0B"
+    },
+    "border": {
+      "default": "#E2E8F0",
+      "focus": "#2563EB"
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "xxl": 48
+  },
+  "layout_and_components": {
+    "general": {
+      "container_padding": 24,
+      "border_radius_small": 8,
+      "border_radius_large": 16
+    },
+    "cards": {
+      "background": "#FFFFFF",
+      "borderWidth": 1,
+      "borderColor": "#E2E8F0",
+      "borderRadius": 12,
+      "shadow": "0px 2px 8px rgba(15, 23, 42, 0.05)"
+    },
+    "buttons": {
+      "primary": {
+        "backgroundColor": "#1D4ED8",
+        "borderRadius": 12,
+        "paddingVertical": 16,
+        "alignItems": "center"
+      },
+      "secondary": {
+        "backgroundColor": "#F1F5F9",
+        "borderRadius": 12,
+        "paddingVertical": 16,
+        "alignItems": "center"
+      }
+    },
+    "inputs": {
+      "borderWidth": 1,
+      "borderColor": "#CBD5E1",
+      "borderRadius": 8,
+      "padding": 16,
+      "fontSize": 16,
+      "backgroundColor": "#FFFFFF"
+    },
+    "lists": {
+      "style": "Cardless, bordered rows. Use 1px bottom border (#E2E8F0) to separate items instead of wrapping each in a card to reduce visual noise."
+    }
+  },
+  "icons": {
+    "library": "@expo/vector-icons",
+    "family": "Feather",
+    "stroke_width": 2,
+    "sizes": {
+      "small": 16,
+      "medium": 24,
+      "large": 32
+    }
+  },
+  "testing": {
+    "attribute": "testID",
+    "description": "Use 'testID' instead of 'data-testid' for React Native elements.",
+    "convention": "kebab-case, role-based (e.g., testID='login-form-submit-button')"
+  },
+  "screens_and_interactions": {
+    "role_selection": {
+      "layout": "Centered vertically with the face_scan_illustration as the hero image above the selection buttons.",
+      "hero_image": "https://static.prod-images.emergentagent.com/jobs/09880b46-2e59-486f-86df-a17b3b81cf29/images/4ec27b0585566d48c63e9f72a5226b9267ea8bd67a7d47e05ae6cbf7c346c3e5.png"
+    },
+    "student_dashboard": {
+      "layout": "Summary widget at the top showing overall attendance percentage (large typography, distinct color coding). Below it, a list of recent sessions.",
+      "empty_state_image": "https://images.unsplash.com/photo-1631599143468-b7d2d09820b6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODh8MHwxfHNlYXJjaHw0fHx1bml2ZXJzaXR5JTIwY2FtcHVzJTIwc3R1ZGVudHN8ZW58MHx8fHwxNzc2NTg2NTU5fDA&ixlib=rb-4.1.0&q=85"
+    },
+    "teacher_dashboard": {
+      "layout": "Floating Action Button (FAB) or prominent top action for 'Create New Session'. List of past sessions organized by date.",
+      "empty_state_image": "https://images.unsplash.com/photo-1564130987042-acbca1b51e8d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwzfHx0ZWFjaGVyJTIwaW4lMjBjbGFzc3Jvb218ZW58MHx8fHwxNzc2NTg2NTYwfDA&ixlib=rb-4.1.0&q=85"
+    },
+    "camera_capture": {
+      "layout": "Full-screen camera view with a bottom drawer/overlay showing captured image thumbnails (1-5 limit) and a 'Process Attendance' CTA."
+    },
+    "recognition_results": {
+      "layout": "List of students mapped to their status (Present/Absent). Use toggles (e.g., Switch component) for manual overrides. Sticky bottom bar for the 'Save Attendance' action."
+    }
+  },
+  "media": {
+    "images": [
+      {
+        "category": "hero_illustration",
+        "description": "Minimalist face recognition AI illustration for splash or role selection screen",
+        "url": "https://static.prod-images.emergentagent.com/jobs/09880b46-2e59-486f-86df-a17b3b81cf29/images/4ec27b0585566d48c63e9f72a5226b9267ea8bd67a7d47e05ae6cbf7c346c3e5.png"
+      },
+      {
+        "category": "student_placeholder",
+        "description": "Placeholder for student avatar/empty states",
+        "url": "https://images.unsplash.com/photo-1648301033733-44554c74ec50?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODh8MHwxfHNlYXJjaHwzfHx1bml2ZXJzaXR5JTIwY2FtcHVzJTIwc3R1ZGVudHN8ZW58MHx8fHwxNzc2NTg2NTU5fDA&ixlib=rb-4.1.0&q=85"
+      },
+      {
+        "category": "teacher_placeholder",
+        "description": "Placeholder for teacher dashboard empty state",
+        "url": "https://images.unsplash.com/photo-1574130303188-31a915382726?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHw0fHx0ZWFjaGVyJTIwaW4lMjBjbGFzc3Jvb218ZW58MHx8fHwxNzc2NTg2NTYwfDA&ixlib=rb-4.1.0&q=85"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Load custom fonts Outfit and Manrope via expo-google-fonts if possible, else fallback to standard sans-serif system fonts with appropriate weights.",
+    "Use testID attribute on all touchable elements (e.g., buttons, inputs, list items) to ensure testability.",
+    "Maintain high contrast. Ensure text colors meet accessibility standards against their backgrounds.",
+    "Do not use generic 'card' wrappers for list items in the attendance results; use flat rows with bottom borders to reduce UI clutter.",
+    "The camera screen needs clear affordances for capturing multiple images before processing.",
+    "Follow the defined spacing scale strictly to maintain the 'generous spacing' philosophy."
+  ]
+}
