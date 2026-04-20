@@ -41,7 +41,7 @@ export default function TeacherDashboard() {
           <Text style={typography.h2} testID="teacher-name">{user?.name ?? ""}</Text>
           {user?.subject ? <Text style={typography.small}>{user.subject}</Text> : null}
         </View>
-        <TouchableOpacity testID="teacher-logout" onPress={async () => { await logout(); router.replace("/"); }} style={styles.logoutBtn}>
+        <TouchableOpacity testID="teacher-logout" onPress={async () => { await logout(); router.replace("/login"); }} style={styles.logoutBtn}>
           <Feather name="log-out" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>

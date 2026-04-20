@@ -6,6 +6,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import { api, formatApiError } from "../../../src/api";
 import { colors, spacing, typography, shared } from "../../../src/theme";
@@ -15,22 +18,40 @@ interface AttRow {
   student_id: string; name: string; usn: string; roll_number: string;
   status: "present" | "absent"; similarity?: number | null;
 }
+interface Student {
+  id: string; name: string; usn: string; roll_number: string;
+  branch?: string; face_registered: boolean;
+}
 
 export default function SessionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
-  const [images, setImages] = useState<string[]>([]);  // base64
+  const [images, setImages] = useState<string[]>([]);
   const [rows, setRows] = useState<AttRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [summary, setSummary] = useState<{ detected: number; matched: number; total: number } | null>(null);
 
   const load = async () => {
     try {
       const { data } = await api.get(`/sessions/${id}`);
       setSession(data);
+      // For completed sessions, load existing attendance so teacher can edit.
+      if (data.status === "completed") {
+        const { data: studs } = await api.get(`/sessions/${id}/students`);
+        const attMap: Record<string, string> = {};
+        (data.attendance || []).forEach((e: any) => { attMap[e.student_id] = e.status; });
+        const merged: AttRow[] = (studs as Student[]).map((s) => ({
+          student_id: s.id, name: s.name, usn: s.usn,
+          roll_number: s.roll_number,
+          status: (attMap[s.id] as any) || "absent",
+          similarity: null,
+        }));
+        merged.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
+        setRows(merged);
+      }
     } catch (e) { Alert.alert("Error", formatApiError(e)); }
   };
 
@@ -38,39 +59,26 @@ export default function SessionDetail() {
 
   const pickImages = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission required", "Please allow photo access.");
-      return;
-    }
+    if (status !== "granted") { Alert.alert("Permission required"); return; }
     const res = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      base64: true,
-      quality: 0.6,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      selectionLimit: 5,
+      allowsMultipleSelection: true, base64: true, quality: 0.6,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, selectionLimit: 5,
     });
     if (res.canceled) return;
     const newImgs = res.assets.map((a) => a.base64!).filter(Boolean);
-    setImages((prev) => [...prev, ...newImgs].slice(0, 5));
+    setImages((p) => [...p, ...newImgs].slice(0, 5));
   };
 
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Camera permission required");
-      return;
-    }
-    const res = await ImagePicker.launchCameraAsync({
-      base64: true, quality: 0.6,
-    });
+    if (status !== "granted") { Alert.alert("Camera permission required"); return; }
+    const res = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6 });
     if (res.canceled) return;
     const b64 = res.assets[0].base64;
-    if (b64) setImages((prev) => [...prev, b64].slice(0, 5));
+    if (b64) setImages((p) => [...p, b64].slice(0, 5));
   };
 
-  const removeImage = (idx: number) => {
-    setImages((p) => p.filter((_, i) => i !== idx));
-  };
+  const removeImage = (idx: number) => setImages((p) => p.filter((_, i) => i !== idx));
 
   const runRecognize = async () => {
     if (!images.length) { Alert.alert("Capture at least 1 photo"); return; }
@@ -85,19 +93,30 @@ export default function SessionDetail() {
         matched: data.total_matched,
         total: data.total_students,
       });
-    } catch (e) {
-      Alert.alert("Recognition failed", formatApiError(e));
-    } finally { setRecognizing(false); }
+    } catch (e) { Alert.alert("Recognition failed", formatApiError(e)); }
+    finally { setRecognizing(false); }
+  };
+
+  const loadRosterManually = async () => {
+    // Load class roster so teacher can take attendance without running recognition.
+    try {
+      const { data: studs } = await api.get(`/sessions/${id}/students`);
+      const r: AttRow[] = (studs as Student[]).map((s) => ({
+        student_id: s.id, name: s.name, usn: s.usn,
+        roll_number: s.roll_number, status: "absent", similarity: null,
+      }));
+      r.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
+      setRows(r);
+      setSummary({ detected: 0, matched: 0, total: r.length });
+    } catch (e) { Alert.alert("Error", formatApiError(e)); }
   };
 
   const toggleStatus = (sid: string) => {
-    setRows((prev) =>
-      prev?.map((r) =>
-        r.student_id === sid
-          ? { ...r, status: r.status === "present" ? "absent" : "present" }
-          : r
-      ) ?? null
-    );
+    setRows((prev) => prev?.map((r) =>
+      r.student_id === sid
+        ? { ...r, status: r.status === "present" ? "absent" : "present" }
+        : r
+    ) ?? null);
   };
 
   const save = async () => {
@@ -114,6 +133,38 @@ export default function SessionDetail() {
     finally { setSaving(false); }
   };
 
+  const reopen = async () => {
+    try {
+      await api.put(`/sessions/${id}/reopen`);
+      await load();
+      Alert.alert("Session reopened", "You can edit attendance; remember to save.");
+    } catch (e) { Alert.alert("Error", formatApiError(e)); }
+  };
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const base = process.env.EXPO_PUBLIC_BACKEND_URL;
+      const token = await AsyncStorage.getItem("auth_token");
+      const url = `${base}/api/sessions/${id}/export`;
+      const filename = `attendance_${session?.lecture?.replace(/\s+/g, "_")}_${session?.date}.csv`;
+      const dest = FileSystem.documentDirectory + filename;
+      const res = await FileSystem.downloadAsync(url, dest, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(res.uri, {
+          mimeType: "text/csv", dialogTitle: "Share Attendance CSV",
+        });
+      } else {
+        Alert.alert("Saved", `CSV saved to: ${res.uri}`);
+      }
+    } catch (e: any) {
+      Alert.alert("Export failed", e?.message || "Could not export CSV");
+    } finally { setExporting(false); }
+  };
+
   if (!session) {
     return (
       <SafeAreaView style={[shared.screen, { alignItems: "center", justifyContent: "center" }]}>
@@ -122,19 +173,27 @@ export default function SessionDetail() {
     );
   }
 
+  const isCompleted = session.status === "completed";
   const presentCount = rows?.filter((r) => r.status === "present").length ?? 0;
 
   return (
     <SafeAreaView style={shared.screen}>
       <View style={{ paddingHorizontal: spacing.lg }}>
-        <Header title={session.lecture}
-          subtitle={`Sem ${session.semester} · Div ${session.division} · ${session.date} · ${session.time_from}–${session.time_to}`} />
+        <Header
+          title={session.lecture}
+          subtitle={`Sem ${session.semester} · Div ${session.division} · ${session.date} · ${session.time_from}–${session.time_to}`}
+          right={isCompleted ? (
+            <View style={[s.statusBadge, { backgroundColor: "#D1FAE5" }]}>
+              <Text style={{ color: colors.present, fontFamily: "Manrope_600SemiBold", fontSize: 11 }}>COMPLETED</Text>
+            </View>
+          ) : null}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 140 }}>
         {!rows ? (
           <>
-            <Text style={[typography.label, { marginTop: spacing.md }]}>Step 1 — Capture classroom photos ({images.length}/5)</Text>
+            <Text style={[typography.label, { marginTop: spacing.md }]}>Classroom photos ({images.length}/5)</Text>
             <View style={s.thumbs}>
               {images.map((b64, i) => (
                 <View key={i} style={s.thumbWrap}>
@@ -158,10 +217,6 @@ export default function SessionDetail() {
               )}
             </View>
 
-            <Text style={[typography.small, { marginTop: spacing.md }]}>
-              Tip: Capture wide-angle shots covering all students. 2–3 photos boost accuracy.
-            </Text>
-
             <TouchableOpacity
               testID="run-recognize-btn"
               style={[shared.btnPrimary, { marginTop: spacing.lg, opacity: images.length ? 1 : 0.5 }]}
@@ -171,6 +226,12 @@ export default function SessionDetail() {
               {recognizing ? <ActivityIndicator color="#fff" /> :
                 <Text style={shared.btnPrimaryText}>Run Face Recognition</Text>}
             </TouchableOpacity>
+
+            <TouchableOpacity testID="manual-roster-btn" onPress={loadRosterManually} style={{ alignItems: "center", paddingVertical: 14 }}>
+              <Text style={{ color: colors.brand, fontFamily: "Manrope_600SemiBold" }}>
+                Or take attendance manually →
+              </Text>
+            </TouchableOpacity>
           </>
         ) : (
           <>
@@ -178,7 +239,7 @@ export default function SessionDetail() {
               <View style={s.summaryCard}>
                 <View style={s.summaryItem}>
                   <Text style={s.summaryNum}>{summary.detected}</Text>
-                  <Text style={typography.small}>Faces detected</Text>
+                  <Text style={typography.small}>Detected</Text>
                 </View>
                 <View style={s.summaryDivider} />
                 <View style={s.summaryItem}>
@@ -193,10 +254,10 @@ export default function SessionDetail() {
               </View>
             )}
 
-            <Text style={[typography.label, { marginTop: spacing.md }]}>Step 2 — Review & edit</Text>
+            <Text style={[typography.label, { marginTop: spacing.md }]}>Review & edit</Text>
             {rows.length === 0 ? (
               <Text style={[typography.bodyMuted, { marginTop: 12 }]}>
-                No enrolled students for Sem {session.semester} Div {session.division}.
+                No students enrolled in Sem {session.semester} Div {session.division}.
               </Text>
             ) : (
               rows.map((r) => (
@@ -222,6 +283,21 @@ export default function SessionDetail() {
                 </View>
               ))
             )}
+
+            {isCompleted && (
+              <TouchableOpacity
+                testID="export-csv-btn"
+                style={[shared.btnSecondary, { marginTop: spacing.lg }]}
+                onPress={exportCsv}
+                disabled={exporting}
+              >
+                <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                  {exporting ? <ActivityIndicator color={colors.text} size="small" /> :
+                    <Feather name="download" size={16} color={colors.text} />}
+                  <Text style={shared.btnSecondaryText}>Export CSV</Text>
+                </View>
+              </TouchableOpacity>
+            )}
           </>
         )}
       </ScrollView>
@@ -231,7 +307,7 @@ export default function SessionDetail() {
           <TouchableOpacity testID="save-attendance-btn" style={shared.btnPrimary} onPress={save} disabled={saving}>
             {saving ? <ActivityIndicator color="#fff" /> :
               <Text style={shared.btnPrimaryText}>
-                Save Attendance ({presentCount}/{rows.length} present)
+                {isCompleted ? "Save Changes" : "Save Attendance"} ({presentCount}/{rows.length})
               </Text>}
           </TouchableOpacity>
         </View>
@@ -241,17 +317,14 @@ export default function SessionDetail() {
 }
 
 const s = StyleSheet.create({
+  statusBadge: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999 },
   thumbs: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
   thumbWrap: { position: "relative" },
   thumb: { width: 90, height: 90, borderRadius: 10, backgroundColor: "#EEE" },
-  removeBtn: {
-    position: "absolute", top: -6, right: -6, width: 22, height: 22,
-    borderRadius: 11, backgroundColor: colors.absent, alignItems: "center", justifyContent: "center",
-  },
+  removeBtn: { position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.absent, alignItems: "center", justifyContent: "center" },
   addTile: {
-    width: 90, height: 90, borderRadius: 10,
-    borderWidth: 2, borderColor: colors.border, borderStyle: "dashed",
-    alignItems: "center", justifyContent: "center", gap: 4,
+    width: 90, height: 90, borderRadius: 10, borderWidth: 2, borderColor: colors.border,
+    borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4,
     backgroundColor: colors.bgSecondary,
   },
   addTileText: { fontSize: 11, color: colors.brand, fontFamily: "Manrope_600SemiBold" },
@@ -263,10 +336,7 @@ const s = StyleSheet.create({
   summaryItem: { alignItems: "center" },
   summaryNum: { fontFamily: "Outfit_700Bold", fontSize: 24, color: colors.text },
   summaryDivider: { width: 1, height: 32, backgroundColor: colors.border },
-  row: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   badge: { fontFamily: "Manrope_600SemiBold", fontSize: 11, letterSpacing: 0.8 },
   bottomBar: {
     position: "absolute", left: 0, right: 0, bottom: 0,

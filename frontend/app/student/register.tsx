@@ -4,10 +4,11 @@ import { useRouter } from "expo-router";
 import { api, formatApiError } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { Header, Field, FormScreen, ErrorText, PillToggle } from "../../src/ui";
-import { shared, spacing, typography, colors } from "../../src/theme";
+import { shared, spacing } from "../../src/theme";
 
 const SEMESTERS = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const DIVISIONS = ["A", "B", "C", "D"];
+const BRANCHES = ["CSE", "ISE", "ECE", "EEE", "ME", "CV", "AIDS", "AIML"];
 
 export default function StudentRegister() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export default function StudentRegister() {
   const [name, setName] = useState("");
   const [usn, setUsn] = useState("");
   const [roll, setRoll] = useState("");
+  const [branch, setBranch] = useState("CSE");
   const [sem, setSem] = useState("5");
   const [div, setDiv] = useState("A");
   const [pw, setPw] = useState("");
@@ -28,7 +30,7 @@ export default function StudentRegister() {
     setLoading(true);
     try {
       const { data } = await api.post("/auth/register-student", {
-        name, usn, roll_number: roll, semester: sem, division: div, password: pw,
+        name, usn, roll_number: roll, branch, semester: sem, division: div, password: pw,
       });
       await setAuth(data.token, data.user);
       router.replace("/student/face-capture");
@@ -46,6 +48,10 @@ export default function StudentRegister() {
       <Field label="Roll Number" value={roll} onChangeText={setRoll}
         keyboardType="numeric" testID="student-roll-input" />
 
+      <View style={{ marginTop: spacing.md }}>
+        <Text style={shared.inputLabel}>Branch</Text>
+        <PillToggle options={BRANCHES} value={branch} onChange={setBranch} testID="student-branch-pills" />
+      </View>
       <View style={{ marginTop: spacing.md }}>
         <Text style={shared.inputLabel}>Semester</Text>
         <PillToggle options={SEMESTERS} value={sem} onChange={setSem} testID="student-sem-pills" />
