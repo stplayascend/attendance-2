@@ -9,17 +9,20 @@ import { Feather } from "@expo/vector-icons";
 import { api, formatApiError } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { colors, spacing, typography, shared } from "../../src/theme";
+import { PillToggle } from "../../src/ui";
 
 type Tab = "pending" | "approved" | "students";
-
 interface Teacher {
-  id: string; employee_id: string; name: string; status: string;
-  id_photo_base64?: string; created_at: string;
+  id: string; employee_id: string; name: string; email?: string;
+  status: string; id_photo_base64?: string; courses?: string[]; created_at: string;
 }
 interface Student {
-  id: string; name: string; usn: string; roll_number: string;
+  id: string; name: string; usn: string; email?: string; roll_number: string;
   branch?: string; semester: string; division: string;
 }
+
+const SEMESTERS = ["All", "1", "2", "3", "4", "5", "6", "7", "8"];
+const DIVISIONS = ["All", "A", "B", "C", "D"];
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -28,19 +31,19 @@ export default function AdminDashboard() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // approve modal
-  const [approving, setApproving] = useState<Teacher | null>(null);
-  const [approvePw, setApprovePw] = useState("");
-
-  // edit-student modal
+  const [viewing, setViewing] = useState<Teacher | null>(null);
   const [editing, setEditing] = useState<Student | null>(null);
+  const [filterSem, setFilterSem] = useState("All");
+  const [filterDiv, setFilterDiv] = useState("All");
 
   const load = async () => {
     setLoading(true);
     try {
       if (tab === "students") {
-        const { data } = await api.get("/admin/students");
+        const qs: string[] = [];
+        if (filterSem !== "All") qs.push(`semester=${filterSem}`);
+        if (filterDiv !== "All") qs.push(`division=${filterDiv}`);
+        const { data } = await api.get(`/admin/students${qs.length ? "?" + qs.join("&") : ""}`);
         setStudents(data);
       } else {
         const status = tab === "pending" ? "pending" : "approved";
@@ -51,31 +54,44 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   };
 
-  useFocusEffect(useCallback(() => { load(); }, [tab]));
+  useFocusEffect(useCallback(() => { load(); }, [tab, filterSem, filterDiv]));
 
-  const approve = async () => {
-    if (!approving || !approvePw || approvePw.length < 6) {
-      Alert.alert("Set a password (6+ chars)"); return;
-    }
+  const approve = async (t: Teacher) => {
     try {
-      await api.post(`/admin/teachers/${approving.id}/approve`, { password: approvePw });
-      Alert.alert("Approved", `Employee ${approving.employee_id} can now log in.`);
-      setApproving(null); setApprovePw("");
-      load();
+      const { data } = await api.post(`/admin/teachers/${t.id}/approve`);
+      Alert.alert("Approved",
+        `${t.name} can now log in with Employee ID ${t.employee_id} and password ${data.default_password}. Email sent.`);
+      setViewing(null); load();
     } catch (e) { Alert.alert("Error", formatApiError(e)); }
   };
 
-  const reject = async (t: Teacher) => {
+  const reject = (t: Teacher) => {
     Alert.alert("Reject teacher?", `${t.name} (${t.employee_id})`, [
       { text: "Cancel" },
-      {
-        text: "Reject", style: "destructive", onPress: async () => {
-          try {
-            await api.post(`/admin/teachers/${t.id}/reject`);
-            load();
-          } catch (e) { Alert.alert("Error", formatApiError(e)); }
-        },
-      },
+      { text: "Reject", style: "destructive", onPress: async () => {
+          try { await api.post(`/admin/teachers/${t.id}/reject`); setViewing(null); load(); }
+          catch (e) { Alert.alert("Error", formatApiError(e)); }
+        } },
+    ]);
+  };
+
+  const delTeacher = (t: Teacher) => {
+    Alert.alert("Delete teacher?", `${t.name} (${t.employee_id}) will be permanently removed.`, [
+      { text: "Cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+          try { await api.delete(`/admin/teachers/${t.id}`); setViewing(null); load(); }
+          catch (e) { Alert.alert("Error", formatApiError(e)); }
+        } },
+    ]);
+  };
+
+  const delStudent = (s: Student) => {
+    Alert.alert("Delete student?", `${s.name} (${s.usn}) will be permanently removed.`, [
+      { text: "Cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+          try { await api.delete(`/admin/students/${s.id}`); load(); }
+          catch (e) { Alert.alert("Error", formatApiError(e)); }
+        } },
     ]);
   };
 
@@ -95,11 +111,8 @@ export default function AdminDashboard() {
 
       <View style={s.tabs}>
         {(["pending", "approved", "students"] as Tab[]).map((t) => (
-          <TouchableOpacity
-            key={t} testID={`admin-tab-${t}`}
-            style={[s.tab, tab === t && s.tabActive]}
-            onPress={() => setTab(t)}
-          >
+          <TouchableOpacity key={t} testID={`admin-tab-${t}`}
+            style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
             <Text style={[s.tabText, tab === t && s.tabTextActive]}>
               {t === "pending" ? "Pending" : t === "approved" ? "Teachers" : "Students"}
             </Text>
@@ -107,115 +120,151 @@ export default function AdminDashboard() {
         ))}
       </View>
 
+      {tab === "students" && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ maxHeight: 120 }} contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingVertical: 8 }}>
+          <View>
+            <Text style={shared.inputLabel}>Semester</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              {SEMESTERS.map((o) => (
+                <TouchableOpacity key={o} testID={`filter-sem-${o}`}
+                  onPress={() => setFilterSem(o)}
+                  style={[s.filterPill, filterSem === o && s.filterPillActive]}>
+                  <Text style={[s.filterPillText, filterSem === o && { color: "#fff" }]}>{o}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[shared.inputLabel, { marginTop: 8 }]}>Division</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              {DIVISIONS.map((o) => (
+                <TouchableOpacity key={o} testID={`filter-div-${o}`}
+                  onPress={() => setFilterDiv(o)}
+                  style={[s.filterPill, filterDiv === o && s.filterPillActive]}>
+                  <Text style={[s.filterPillText, filterDiv === o && { color: "#fff" }]}>{o}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+      )}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.brand} />
       ) : tab === "students" ? (
-        <FlatList
-          data={students}
-          keyExtractor={(i) => i.id}
+        <FlatList data={students} keyExtractor={(i) => i.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
           ListEmptyComponent={<Text style={[typography.bodyMuted, { marginTop: 20, textAlign: "center" }]}>No students</Text>}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              testID={`admin-student-${item.usn}`}
-              style={shared.rowItem}
-              onPress={() => setEditing(item)}
-            >
-              <View style={{ flex: 1 }}>
+            <View style={[shared.rowItem, { gap: 8 }]} testID={`admin-student-${item.usn}`}>
+              <TouchableOpacity style={{ flex: 1 }} onPress={() => setEditing(item)}>
                 <Text style={typography.body}>{item.name}</Text>
                 <Text style={typography.small}>
                   {item.usn} · {item.branch || "—"} · Sem {item.semester} · Div {item.division}
                 </Text>
-              </View>
-              <Feather name="edit-2" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditing(item)} style={s.iconBtn} testID={`edit-${item.usn}`}>
+                <Feather name="edit-2" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => delStudent(item)} style={s.iconBtn} testID={`del-${item.usn}`}>
+                <Feather name="trash-2" size={16} color={colors.absent} />
+              </TouchableOpacity>
+            </View>
           )}
         />
       ) : (
-        <FlatList
-          data={teachers}
-          keyExtractor={(i) => i.id}
+        <FlatList data={teachers} keyExtractor={(i) => i.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
           ListEmptyComponent={<Text style={[typography.bodyMuted, { marginTop: 20, textAlign: "center" }]}>
             {tab === "pending" ? "No pending requests" : "No approved teachers"}
           </Text>}
           renderItem={({ item }) => (
-            <View style={s.teacherCard} testID={`admin-teacher-${item.employee_id}`}>
-              <View style={{ flexDirection: "row", gap: 12 }}>
+            <TouchableOpacity
+              testID={`admin-teacher-${item.employee_id}`}
+              style={s.teacherCard}
+              onPress={() => setViewing(item)}
+            >
+              <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
                 {item.id_photo_base64 ? (
-                  <Image source={{ uri: `data:image/jpeg;base64,${item.id_photo_base64}` }} style={s.idPhoto} />
+                  <Image source={{ uri: `data:image/jpeg;base64,${item.id_photo_base64}` }} style={s.idThumb} />
                 ) : (
-                  <View style={[s.idPhoto, { alignItems: "center", justifyContent: "center", backgroundColor: colors.bgSecondary }]}>
-                    <Feather name="user" size={28} color={colors.borderStrong} />
+                  <View style={[s.idThumb, { alignItems: "center", justifyContent: "center", backgroundColor: colors.bgSecondary }]}>
+                    <Feather name="user" size={24} color={colors.borderStrong} />
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={typography.h3}>{item.name}</Text>
-                  <Text style={typography.small}>{item.employee_id}</Text>
-                  <Text style={[typography.small, { marginTop: 4 }]}>
-                    Submitted {new Date(item.created_at).toLocaleDateString()}
-                  </Text>
+                  <Text style={typography.small}>{item.employee_id} · {item.email || ""}</Text>
+                  {item.courses?.length ? (
+                    <Text style={[typography.small, { marginTop: 2 }]}>
+                      {item.courses.length} course{item.courses.length > 1 ? "s" : ""}
+                    </Text>
+                  ) : null}
                 </View>
+                <Feather name="chevron-right" size={20} color={colors.textSecondary} />
               </View>
-              {tab === "pending" && (
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-                  <TouchableOpacity
-                    testID={`approve-${item.employee_id}`}
-                    style={[shared.btnPrimary, { flex: 1 }]}
-                    onPress={() => setApproving(item)}
-                  >
-                    <Text style={shared.btnPrimaryText}>Approve</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    testID={`reject-${item.employee_id}`}
-                    style={[shared.btnSecondary, { flex: 1 }]}
-                    onPress={() => reject(item)}
-                  >
-                    <Text style={[shared.btnSecondaryText, { color: colors.absent }]}>Reject</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
+            </TouchableOpacity>
           )}
         />
       )}
 
-      {/* Approve Modal */}
-      <Modal visible={!!approving} transparent animationType="slide" onRequestClose={() => setApproving(null)}>
-        <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={typography.h3}>Approve {approving?.name}</Text>
-            <Text style={[typography.small, { marginTop: 6 }]}>
-              Set initial password for Employee ID: {approving?.employee_id}
-            </Text>
-            <TextInput
-              testID="approve-password-input"
-              style={[shared.input, { marginTop: 16 }]}
-              placeholder="Initial password (6+ chars)"
-              value={approvePw} onChangeText={setApprovePw}
-              secureTextEntry
-            />
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
-              <TouchableOpacity style={[shared.btnSecondary, { flex: 1 }]} onPress={() => { setApproving(null); setApprovePw(""); }}>
-                <Text style={shared.btnSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity testID="approve-confirm" style={[shared.btnPrimary, { flex: 1 }]} onPress={approve}>
-                <Text style={shared.btnPrimaryText}>Approve</Text>
-              </TouchableOpacity>
+      {/* Teacher detail modal */}
+      {viewing && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setViewing(null)}>
+          <View style={s.modalBg}>
+            <View style={s.modalCard}>
+              <ScrollView>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                  <Text style={[typography.h2, { flex: 1 }]}>{viewing.name}</Text>
+                  <TouchableOpacity onPress={() => setViewing(null)}>
+                    <Feather name="x" size={22} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={typography.small}>Employee ID: {viewing.employee_id}</Text>
+                <Text style={typography.small}>Email: {viewing.email || "—"}</Text>
+                <Text style={typography.small}>Status: {viewing.status}</Text>
+
+                {viewing.courses?.length ? (
+                  <>
+                    <Text style={[typography.label, { marginTop: 14 }]}>Courses</Text>
+                    {viewing.courses.map((c, i) => (
+                      <Text key={i} style={typography.body}>• {c}</Text>
+                    ))}
+                  </>
+                ) : null}
+
+                {viewing.id_photo_base64 && (
+                  <>
+                    <Text style={[typography.label, { marginTop: 14 }]}>ID Card Photo</Text>
+                    <Image source={{ uri: `data:image/jpeg;base64,${viewing.id_photo_base64}` }}
+                      style={s.bigPhoto} resizeMode="contain" />
+                  </>
+                )}
+
+                {tab === "pending" ? (
+                  <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
+                    <TouchableOpacity testID="modal-reject" style={[shared.btnSecondary, { flex: 1 }]} onPress={() => reject(viewing)}>
+                      <Text style={[shared.btnSecondaryText, { color: colors.absent }]}>Reject</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID="modal-approve" style={[shared.btnPrimary, { flex: 1 }]} onPress={() => approve(viewing)}>
+                      <Text style={shared.btnPrimaryText}>Approve</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity testID="modal-delete" style={[shared.btnSecondary, { marginTop: 20 }]} onPress={() => delTeacher(viewing)}>
+                    <Text style={[shared.btnSecondaryText, { color: colors.absent }]}>Delete Teacher</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
 
-      {/* Edit Student Modal */}
       {editing && (
-        <EditStudentModal
-          student={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load(); }}
-        />
+        <EditStudentModal student={editing} onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }} />
       )}
     </SafeAreaView>
   );
@@ -224,6 +273,7 @@ export default function AdminDashboard() {
 function EditStudentModal({ student, onClose, onSaved }:
   { student: Student; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(student.name);
+  const [email, setEmail] = useState(student.email || "");
   const [branch, setBranch] = useState(student.branch || "");
   const [sem, setSem] = useState(student.semester);
   const [div, setDiv] = useState(student.division);
@@ -234,7 +284,7 @@ function EditStudentModal({ student, onClose, onSaved }:
     setSaving(true);
     try {
       await api.put(`/admin/students/${student.id}`, {
-        name, branch, semester: sem, division: div, roll_number: roll,
+        name, email, branch, semester: sem, division: div, roll_number: roll,
       });
       Alert.alert("Saved"); onSaved();
     } catch (e) { Alert.alert("Error", formatApiError(e)); }
@@ -248,22 +298,19 @@ function EditStudentModal({ student, onClose, onSaved }:
           <ScrollView>
             <Text style={typography.h3}>Edit Student</Text>
             <Text style={[typography.small, { marginTop: 4 }]}>{student.usn}</Text>
-
-            <Text style={[shared.inputLabel, { marginTop: 14 }]}>Name</Text>
-            <TextInput style={shared.input} value={name} onChangeText={setName} testID="edit-name" />
-
-            <Text style={[shared.inputLabel, { marginTop: 14 }]}>Branch</Text>
-            <TextInput style={shared.input} value={branch} onChangeText={setBranch} autoCapitalize="characters" testID="edit-branch" />
-
-            <Text style={[shared.inputLabel, { marginTop: 14 }]}>Semester</Text>
-            <TextInput style={shared.input} value={sem} onChangeText={setSem} keyboardType="numeric" testID="edit-sem" />
-
-            <Text style={[shared.inputLabel, { marginTop: 14 }]}>Division</Text>
-            <TextInput style={shared.input} value={div} onChangeText={setDiv} autoCapitalize="characters" testID="edit-div" />
-
-            <Text style={[shared.inputLabel, { marginTop: 14 }]}>Roll Number</Text>
-            <TextInput style={shared.input} value={roll} onChangeText={setRoll} keyboardType="numeric" testID="edit-roll" />
-
+            {[
+              ["Name", name, setName, undefined],
+              ["Email", email, setEmail, "email-address"],
+              ["Branch", branch, setBranch, undefined],
+              ["Semester", sem, setSem, "numeric"],
+              ["Division", div, setDiv, undefined],
+              ["Roll Number", roll, setRoll, "numeric"],
+            ].map(([label, val, set, kb]: any) => (
+              <View key={label}>
+                <Text style={[shared.inputLabel, { marginTop: 14 }]}>{label}</Text>
+                <TextInput style={shared.input} value={val} onChangeText={set} keyboardType={kb} autoCapitalize={kb ? "none" : "words"} />
+              </View>
+            ))}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
               <TouchableOpacity style={[shared.btnSecondary, { flex: 1 }]} onPress={onClose}>
                 <Text style={shared.btnSecondaryText}>Cancel</Text>
@@ -280,33 +327,20 @@ function EditStudentModal({ student, onClose, onSaved }:
 }
 
 const s = StyleSheet.create({
-  topBar: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm,
-  },
-  logoutBtn: {
-    width: 40, height: 40, borderRadius: 10, alignItems: "center",
-    justifyContent: "center", borderWidth: 1, borderColor: colors.border,
-  },
-  tabs: {
-    flexDirection: "row", marginHorizontal: spacing.lg, marginTop: spacing.md,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
+  topBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  logoutBtn: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+  tabs: { flexDirection: "row", marginHorizontal: spacing.lg, marginTop: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   tab: { paddingVertical: 12, paddingHorizontal: 4, marginRight: 20 },
   tabActive: { borderBottomWidth: 2, borderBottomColor: colors.brand },
   tabText: { fontFamily: "Manrope_500Medium", color: colors.textSecondary, fontSize: 14 },
   tabTextActive: { color: colors.brand, fontFamily: "Manrope_600SemiBold" },
-  teacherCard: {
-    padding: 16, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 14, marginTop: 12, backgroundColor: "#fff",
-  },
-  idPhoto: { width: 80, height: 80, borderRadius: 8, backgroundColor: "#EEE" },
-  modalBg: {
-    flex: 1, backgroundColor: "rgba(15,23,42,0.6)",
-    justifyContent: "flex-end",
-  },
-  modalCard: {
-    backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, maxHeight: "85%",
-  },
+  teacherCard: { padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 12, marginTop: 10, backgroundColor: "#fff" },
+  idThumb: { width: 60, height: 60, borderRadius: 8, backgroundColor: "#EEE" },
+  bigPhoto: { width: "100%", height: 260, backgroundColor: "#EEE", borderRadius: 8, marginTop: 8 },
+  modalBg: { flex: 1, backgroundColor: "rgba(15,23,42,0.6)", justifyContent: "flex-end" },
+  modalCard: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "88%" },
+  filterPill: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: "#fff" },
+  filterPillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  filterPillText: { fontFamily: "Manrope_500Medium", color: colors.text, fontSize: 13 },
+  iconBtn: { padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
 });

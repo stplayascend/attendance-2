@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { api, formatApiError } from "../../src/api";
+import { api } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { colors, spacing, typography, shared } from "../../src/theme";
 
@@ -13,32 +13,24 @@ interface Rec {
   id: string; session_id: string; lecture: string; date: string;
   time_from: string; time_to: string; status: "present" | "absent";
 }
-interface Note {
-  id: string; title: string; message: string; status: string;
-  read: boolean; created_at: string;
-}
 
 export default function StudentDashboard() {
   const router = useRouter();
   const { user, logout, token } = useAuth();
   const [data, setData] = useState<{ total: number; present: number; absent: number; percentage: number; records: Rec[] } | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"history" | "notifications">("history");
 
   const load = async () => {
     try {
-      const [att, nt] = await Promise.all([
-        api.get("/attendance/student"), api.get("/notifications"),
-      ]);
-      setData(att.data); setNotes(nt.data);
-    } catch (e) { /* ignore */ }
+      const { data } = await api.get("/attendance/student");
+      setData(data);
+    } catch { /* ignore */ }
     finally { setLoading(false); }
   };
 
   useFocusEffect(useCallback(() => { load(); }, []));
 
-  // WebSocket — real-time notifications
+  // Real-time attendance updates via WebSocket (refresh list on push).
   useEffect(() => {
     if (!token) return;
     const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
@@ -46,23 +38,11 @@ export default function StudentDashboard() {
     let ws: WebSocket | null = null;
     let closed = false;
     let retryTimer: any = null;
-
     const connect = () => {
       try {
         ws = new WebSocket(wsUrl);
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type === "notification" && msg.data) {
-              setNotes((p) => [msg.data, ...p]);
-              // refresh attendance stats too
-              load();
-            }
-          } catch {}
-        };
-        ws.onclose = () => {
-          if (!closed) retryTimer = setTimeout(connect, 3000);
-        };
+        ws.onmessage = () => load();
+        ws.onclose = () => { if (!closed) retryTimer = setTimeout(connect, 3000); };
       } catch {}
     };
     connect();
@@ -73,17 +53,12 @@ export default function StudentDashboard() {
     };
   }, [token]);
 
-  const markRead = async (id: string) => {
-    try {
-      await api.put(`/notifications/${id}/read`);
-      setNotes((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    } catch {}
-  };
-
   const doLogout = async () => { await logout(); router.replace("/login"); };
 
-  const unreadCount = notes.filter((n) => !n.read).length;
-  const pctColor = !data ? colors.text : data.percentage >= 75 ? colors.present : data.percentage >= 50 ? colors.warning : colors.absent;
+  const pctColor = !data ? colors.text
+    : data.percentage >= 75 ? colors.present
+    : data.percentage >= 50 ? colors.warning
+    : colors.absent;
 
   return (
     <SafeAreaView style={shared.screen}>
@@ -95,16 +70,18 @@ export default function StudentDashboard() {
             {user?.usn} · {user?.branch || ""} · Sem {user?.semester} · Div {user?.division}
           </Text>
         </View>
+        <TouchableOpacity testID="student-settings" onPress={() => router.push("/change-password")}
+          style={[s.logoutBtn, { marginRight: 8 }]}>
+          <Feather name="lock" size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity testID="student-logout" onPress={doLogout} style={s.logoutBtn}>
           <Feather name="log-out" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {!user?.face_registered && (
-        <TouchableOpacity
-          testID="register-face-banner" style={s.banner}
-          onPress={() => router.push("/student/face-capture")}
-        >
+        <TouchableOpacity testID="register-face-banner" style={s.banner}
+          onPress={() => router.push("/student/face-capture")}>
           <Feather name="alert-triangle" size={18} color={colors.warning} />
           <Text style={{ flex: 1, marginLeft: 8, color: colors.text, fontFamily: "Manrope_500Medium" }}>
             Register your face to enable attendance
@@ -134,20 +111,12 @@ export default function StudentDashboard() {
         </View>
       </View>
 
-      <View style={s.tabs}>
-        <TouchableOpacity testID="tab-history" style={[s.tab, tab === "history" && s.tabActive]} onPress={() => setTab("history")}>
-          <Text style={[s.tabText, tab === "history" && s.tabTextActive]}>History</Text>
-        </TouchableOpacity>
-        <TouchableOpacity testID="tab-notifications" style={[s.tab, tab === "notifications" && s.tabActive]} onPress={() => setTab("notifications")}>
-          <Text style={[s.tabText, tab === "notifications" && s.tabTextActive]}>
-            Notifications{unreadCount ? ` (${unreadCount})` : ""}
-          </Text>
-        </TouchableOpacity>
+      <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.lg, marginBottom: 4 }}>
+        <Text style={typography.label}>Attendance</Text>
       </View>
 
-      {loading ? <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.brand} /> : tab === "history" ? (
-        <FlatList
-          data={data?.records ?? []} keyExtractor={(i) => i.id}
+      {loading ? <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.brand} /> : (
+        <FlatList data={data?.records ?? []} keyExtractor={(i) => i.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
           ListEmptyComponent={
@@ -168,31 +137,6 @@ export default function StudentDashboard() {
             </View>
           )}
         />
-      ) : (
-        <FlatList
-          data={notes} keyExtractor={(i) => i.id}
-          contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl }}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
-          ListEmptyComponent={
-            <View style={{ alignItems: "center", paddingTop: spacing.xl }}>
-              <Feather name="bell-off" size={36} color={colors.borderStrong} />
-              <Text style={[typography.bodyMuted, { marginTop: 8 }]}>No notifications</Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[s.noteRow, !item.read && { backgroundColor: colors.bgSecondary }]}
-              onPress={() => markRead(item.id)}
-            >
-              <View style={[s.noteDot, { backgroundColor: item.status === "present" ? colors.present : colors.absent }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={typography.body}>{item.title}</Text>
-                <Text style={typography.small}>{item.message}</Text>
-              </View>
-              {!item.read && <View style={s.unreadDot} />}
-            </TouchableOpacity>
-          )}
-        />
       )}
     </SafeAreaView>
   );
@@ -207,13 +151,5 @@ const s = StyleSheet.create({
   statsRow: { flexDirection: "row", gap: 16, marginTop: 10 },
   statsItem: { flex: 1 },
   statNum: { fontFamily: "Outfit_700Bold", fontSize: 20, color: colors.text },
-  tabs: { flexDirection: "row", marginHorizontal: spacing.lg, marginTop: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border },
-  tab: { paddingVertical: 12, paddingHorizontal: 4, marginRight: 20 },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.brand },
-  tabText: { fontFamily: "Manrope_500Medium", color: colors.textSecondary, fontSize: 14 },
-  tabTextActive: { color: colors.brand, fontFamily: "Manrope_600SemiBold" },
   badge: { fontFamily: "Manrope_600SemiBold", fontSize: 12, letterSpacing: 0.8 },
-  noteRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10, marginTop: 8, borderWidth: 1, borderColor: colors.border },
-  noteDot: { width: 8, height: 8, borderRadius: 4 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand },
 });

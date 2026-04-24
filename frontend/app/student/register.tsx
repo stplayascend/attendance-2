@@ -15,6 +15,7 @@ export default function StudentRegister() {
   const { setAuth } = useAuth();
   const [name, setName] = useState("");
   const [usn, setUsn] = useState("");
+  const [email, setEmail] = useState("");
   const [roll, setRoll] = useState("");
   const [branch, setBranch] = useState("CSE");
   const [sem, setSem] = useState("5");
@@ -25,12 +26,12 @@ export default function StudentRegister() {
 
   const submit = async () => {
     setErr(null);
-    if (!name || !usn || !roll || !pw) { setErr("Please fill required fields"); return; }
+    if (!name || !usn || !email || !roll || !pw) { setErr("Please fill required fields"); return; }
     if (pw.length < 6) { setErr("Password must be 6+ characters"); return; }
     setLoading(true);
     try {
       const { data } = await api.post("/auth/register-student", {
-        name, usn, roll_number: roll, branch, semester: sem, division: div, password: pw,
+        name, usn, email, roll_number: roll, branch, semester: sem, division: div, password: pw,
       });
       await setAuth(data.token, data.user);
       router.replace("/student/face-capture");
@@ -41,13 +42,12 @@ export default function StudentRegister() {
   return (
     <FormScreen>
       <Header title="Student Sign Up" subtitle="We'll register your face next" />
-      <Field label="Full Name" value={name} onChangeText={setName}
-        autoCapitalize="words" testID="student-name-input" />
+      <Field label="Full Name" value={name} onChangeText={setName} autoCapitalize="words" testID="student-name-input" />
       <Field label="USN" value={usn} onChangeText={(t) => setUsn(t.toUpperCase())}
         placeholder="e.g. 1AB20CS001" autoCapitalize="characters" testID="student-usn-input" />
-      <Field label="Roll Number" value={roll} onChangeText={setRoll}
-        keyboardType="numeric" testID="student-roll-input" />
-
+      <Field label="Email" value={email} onChangeText={setEmail}
+        placeholder="you@kletech.ac.in" keyboardType="email-address" testID="student-email-input" />
+      <Field label="Roll Number" value={roll} onChangeText={setRoll} keyboardType="numeric" testID="student-roll-input" />
       <View style={{ marginTop: spacing.md }}>
         <Text style={shared.inputLabel}>Branch</Text>
         <PillToggle options={BRANCHES} value={branch} onChange={setBranch} testID="student-branch-pills" />
@@ -60,13 +60,11 @@ export default function StudentRegister() {
         <Text style={shared.inputLabel}>Division</Text>
         <PillToggle options={DIVISIONS} value={div} onChange={setDiv} testID="student-div-pills" />
       </View>
-
       <Field label="Password" value={pw} onChangeText={setPw} secureTextEntry testID="student-password-input" />
       <ErrorText message={err} />
       <TouchableOpacity
         testID="student-register-submit"
-        style={[shared.btnPrimary, { marginTop: spacing.lg }]}
-        onPress={submit} disabled={loading}
+        style={[shared.btnPrimary, { marginTop: spacing.lg }]} onPress={submit} disabled={loading}
       >
         {loading ? <ActivityIndicator color="#fff" /> :
           <Text style={shared.btnPrimaryText}>Continue to Face Capture</Text>}
