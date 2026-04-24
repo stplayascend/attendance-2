@@ -185,7 +185,7 @@ class EditStudent(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    current_password: str
+    current_password: Optional[str] = ""
     new_password: str
 
 
@@ -341,7 +341,11 @@ async def change_password(payload: PasswordChange, user: dict = Depends(get_curr
         raise HTTPException(403, "Admin password is fixed")
     coll = db.teachers if role == "teacher" else db.students
     rec = await coll.find_one({"id": user["id"]})
-    if not rec or not verify_pw(payload.current_password, rec.get("password_hash", "")):
+    if not rec:
+        raise HTTPException(401, "User not found")
+    # Skip current-password check on first-login forced change.
+    is_first = bool(rec.get("must_change_password"))
+    if not is_first and not verify_pw(payload.current_password, rec.get("password_hash", "")):
         raise HTTPException(401, "Current password is incorrect")
     if len(payload.new_password) < 6:
         raise HTTPException(400, "New password must be 6+ characters")
@@ -747,11 +751,50 @@ async def admin_reject(teacher_id: str, user: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+class DeleteWithReason(BaseModel):
+    reason: str
+
+
 @api.delete("/admin/teachers/{teacher_id}")
-async def admin_delete_teacher(teacher_id: str, user: dict = Depends(require_admin)):
-    res = await db.teachers.delete_one({"id": teacher_id})
-    if res.deleted_count == 0:
+async def admin_delete_teacher(
+    teacher_id: str, reason: Optional[str] = Query(None),
+    user: dict = Depends(require_admin),
+):
+    t = await db.teachers.find_one({"id": teacher_id})
+    if not t:
         raise HTTPException(404, "Teacher not found")
+    await db.teachers.delete_one({"id": teacher_id})
+    if t.get("email"):
+        html = f"""
+        <h2>Your teacher account has been removed</h2>
+        <p>Hi {t.get('name','there')},</p>
+        <p>Your account with Employee ID <b>{t.get('employee_id')}</b> was removed by admin.</p>
+        <p><b>Reason:</b> {reason or 'Not specified'}</p>
+        """
+        email_service.send_email(t["email"], "Account removed", html)
+    return {"ok": True}
+
+
+@api.delete("/admin/students/{student_id}")
+async def admin_delete_student(
+    student_id: str, reason: Optional[str] = Query(None),
+    user: dict = Depends(require_admin),
+):
+    s = await db.students.find_one({"id": student_id})
+    if not s:
+        raise HTTPException(404, "Student not found")
+    await db.students.delete_one({"id": student_id})
+    # Cascade: remove their attendance + notifications
+    await db.attendance.delete_many({"student_id": student_id})
+    await db.notifications.delete_many({"student_id": student_id})
+    if s.get("email"):
+        html = f"""
+        <h2>Your student account has been removed</h2>
+        <p>Hi {s.get('name','there')},</p>
+        <p>Your account with USN <b>{s.get('usn')}</b> was removed by admin.</p>
+        <p><b>Reason:</b> {reason or 'Not specified'}</p>
+        """
+        email_service.send_email(s["email"], "Account removed", html)
     return {"ok": True}
 
 
@@ -783,11 +826,8 @@ async def admin_edit_student(
     return {"ok": True, "updated": list(updates.keys())}
 
 
-@api.delete("/admin/students/{student_id}")
-async def admin_delete_student(student_id: str, user: dict = Depends(require_admin)):
-    res = await db.students.delete_one({"id": student_id})
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Student not found")
+@api.delete("/admin/students/{student_id}__legacy")
+async def _legacy_unused(student_id: str, user: dict = Depends(require_admin)):
     return {"ok": True}
 
 

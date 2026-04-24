@@ -76,23 +76,56 @@ export default function AdminDashboard() {
   };
 
   const delTeacher = (t: Teacher) => {
-    Alert.alert("Delete teacher?", `${t.name} (${t.employee_id}) will be permanently removed.`, [
-      { text: "Cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => {
-          try { await api.delete(`/admin/teachers/${t.id}`); setViewing(null); load(); }
-          catch (e) { Alert.alert("Error", formatApiError(e)); }
+    Alert.prompt ? Alert.prompt(
+      "Delete teacher?",
+      `${t.name} (${t.employee_id}) will be permanently removed.\nEnter reason (for audit + email):`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: async (reason) => {
+          try {
+            await api.delete(`/admin/teachers/${t.id}`, { params: { reason: reason || "" } });
+            setViewing(null); load();
+          } catch (e) { Alert.alert("Error", formatApiError(e)); }
         } },
-    ]);
+      ],
+      "plain-text"
+    ) : (async () => {
+      // Android fallback (Alert.prompt is iOS only): use simple confirm with default reason
+      Alert.alert("Delete teacher?", `${t.name} (${t.employee_id})`, [
+        { text: "Cancel" },
+        { text: "Delete", style: "destructive", onPress: async () => {
+          try {
+            await api.delete(`/admin/teachers/${t.id}`, { params: { reason: "Removed by admin" } });
+            setViewing(null); load();
+          } catch (e) { Alert.alert("Error", formatApiError(e)); }
+        } },
+      ]);
+    })();
   };
 
-  const delStudent = (s: Student) => {
-    Alert.alert("Delete student?", `${s.name} (${s.usn}) will be permanently removed.`, [
-      { text: "Cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => {
-          try { await api.delete(`/admin/students/${s.id}`); load(); }
-          catch (e) { Alert.alert("Error", formatApiError(e)); }
-        } },
-    ]);
+  const delStudent = (stu: Student) => {
+    const doDelete = async (reason: string) => {
+      try {
+        await api.delete(`/admin/students/${stu.id}`, { params: { reason } });
+        load();
+      } catch (e) { Alert.alert("Error", formatApiError(e)); }
+    };
+    if (Alert.prompt) {
+      Alert.prompt(
+        "Delete student?",
+        `${stu.name} (${stu.usn}) will be permanently removed.\nEnter reason:`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: (r) => doDelete(r || "") },
+        ],
+        "plain-text"
+      );
+    } else {
+      Alert.alert("Delete student?", `${stu.name} (${stu.usn})`, [
+        { text: "Cancel" },
+        { text: "Delete", style: "destructive", onPress: () => doDelete("Removed by admin") },
+      ]);
+    }
   };
 
   const doLogout = async () => { await logout(); router.replace("/login"); };
@@ -121,11 +154,10 @@ export default function AdminDashboard() {
       </View>
 
       {tab === "students" && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ maxHeight: 120 }} contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingVertical: 8 }}>
-          <View>
-            <Text style={shared.inputLabel}>Semester</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+        <View style={{ paddingHorizontal: spacing.lg, paddingTop: 8 }}>
+          <Text style={shared.inputLabel}>Semester</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
               {SEMESTERS.map((o) => (
                 <TouchableOpacity key={o} testID={`filter-sem-${o}`}
                   onPress={() => setFilterSem(o)}
@@ -134,8 +166,10 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[shared.inputLabel, { marginTop: 8 }]}>Division</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+          </ScrollView>
+          <Text style={[shared.inputLabel, { marginTop: 10 }]}>Division</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
               {DIVISIONS.map((o) => (
                 <TouchableOpacity key={o} testID={`filter-div-${o}`}
                   onPress={() => setFilterDiv(o)}
@@ -144,8 +178,8 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       )}
 
       {loading ? (
