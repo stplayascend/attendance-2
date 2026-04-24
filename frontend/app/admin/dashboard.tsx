@@ -75,58 +75,36 @@ export default function AdminDashboard() {
     ]);
   };
 
-  const delTeacher = (t: Teacher) => {
-    Alert.prompt ? Alert.prompt(
-      "Delete teacher?",
-      `${t.name} (${t.employee_id}) will be permanently removed.\nEnter reason (for audit + email):`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: async (reason) => {
-          try {
-            await api.delete(`/admin/teachers/${t.id}`, { params: { reason: reason || "" } });
-            setViewing(null); load();
-          } catch (e) { Alert.alert("Error", formatApiError(e)); }
-        } },
-      ],
-      "plain-text"
-    ) : (async () => {
-      // Android fallback (Alert.prompt is iOS only): use simple confirm with default reason
-      Alert.alert("Delete teacher?", `${t.name} (${t.employee_id})`, [
-        { text: "Cancel" },
-        { text: "Delete", style: "destructive", onPress: async () => {
-          try {
-            await api.delete(`/admin/teachers/${t.id}`, { params: { reason: "Removed by admin" } });
-            setViewing(null); load();
-          } catch (e) { Alert.alert("Error", formatApiError(e)); }
-        } },
-      ]);
-    })();
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: "teacher"; id: string; label: string }
+    | { kind: "student"; id: string; label: string }
+    | null
+  >(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const r = deleteReason.trim() || "Removed by admin";
+    setDeleting(true);
+    try {
+      const url = deleteTarget.kind === "teacher"
+        ? `/admin/teachers/${deleteTarget.id}`
+        : `/admin/students/${deleteTarget.id}`;
+      await api.delete(url, { params: { reason: r } });
+      setDeleteTarget(null);
+      setDeleteReason("");
+      setViewing(null);
+      load();
+    } catch (e) { Alert.alert("Error", formatApiError(e)); }
+    finally { setDeleting(false); }
   };
 
-  const delStudent = (stu: Student) => {
-    const doDelete = async (reason: string) => {
-      try {
-        await api.delete(`/admin/students/${stu.id}`, { params: { reason } });
-        load();
-      } catch (e) { Alert.alert("Error", formatApiError(e)); }
-    };
-    if (Alert.prompt) {
-      Alert.prompt(
-        "Delete student?",
-        `${stu.name} (${stu.usn}) will be permanently removed.\nEnter reason:`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete", style: "destructive", onPress: (r) => doDelete(r || "") },
-        ],
-        "plain-text"
-      );
-    } else {
-      Alert.alert("Delete student?", `${stu.name} (${stu.usn})`, [
-        { text: "Cancel" },
-        { text: "Delete", style: "destructive", onPress: () => doDelete("Removed by admin") },
-      ]);
-    }
-  };
+  const delTeacher = (t: Teacher) =>
+    setDeleteTarget({ kind: "teacher", id: t.id, label: `${t.name} (${t.employee_id})` });
+
+  const delStudent = (stu: Student) =>
+    setDeleteTarget({ kind: "student", id: stu.id, label: `${stu.name} (${stu.usn})` });
 
   const doLogout = async () => { await logout(); router.replace("/login"); };
 
@@ -300,6 +278,41 @@ export default function AdminDashboard() {
         <EditStudentModal student={editing} onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }} />
       )}
+
+      {/* Delete-with-reason modal (works on all platforms) */}
+      <Modal visible={!!deleteTarget} transparent animationType="fade"
+        onRequestClose={() => setDeleteTarget(null)}>
+        <View style={s.modalBg}>
+          <View style={[s.modalCard, { maxHeight: "60%" }]}>
+            <Text style={typography.h3}>
+              Delete {deleteTarget?.kind === "teacher" ? "teacher" : "student"}?
+            </Text>
+            <Text style={[typography.small, { marginTop: 6 }]}>{deleteTarget?.label}</Text>
+            <Text style={[typography.bodyMuted, { marginTop: 10 }]}>
+              This cannot be undone. An email with the reason will be sent to them.
+            </Text>
+            <Text style={[shared.inputLabel, { marginTop: 16 }]}>Reason (optional)</Text>
+            <TextInput
+              testID="delete-reason-input"
+              style={[shared.input, { minHeight: 80 }]}
+              multiline value={deleteReason} onChangeText={setDeleteReason}
+              placeholder="e.g. Left the institute"
+            />
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+              <TouchableOpacity style={[shared.btnSecondary, { flex: 1 }]}
+                onPress={() => { setDeleteTarget(null); setDeleteReason(""); }}>
+                <Text style={shared.btnSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="delete-confirm"
+                style={[shared.btnPrimary, { flex: 1, backgroundColor: colors.absent }]}
+                onPress={confirmDelete} disabled={deleting}>
+                {deleting ? <ActivityIndicator color="#fff" /> :
+                  <Text style={shared.btnPrimaryText}>Delete</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
