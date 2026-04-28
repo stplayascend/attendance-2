@@ -25,23 +25,51 @@ def _from():
 
 def send_email(to_email: str, subject: str, html: str) -> bool:
     sg = _client()
-    if not sg:
-        logger.warning("SENDGRID not configured; skipping email to %s", to_email)
-        return False
-    try:
-        msg = Mail(
-            from_email=_from(),
-            to_emails=To(to_email),
-            subject=subject,
-            html_content=Content("text/html", html),
-        )
-        resp = sg.send(msg)
-        logger.info("email sent to=%s status=%s", to_email, resp.status_code)
-        return 200 <= resp.status_code < 300
-    except Exception as e:
-        logger.exception("email send failed: %s", e)
-        return False
 
+    # 🔹 Try SendGrid first
+    if sg:
+        try:
+            msg = Mail(
+                from_email=_from(),
+                to_emails=To(to_email),
+                subject=subject,
+                html_content=Content("text/html", html),
+            )
+            resp = sg.send(msg)
+            logger.info("SendGrid email sent to=%s status=%s", to_email, resp.status_code)
+
+            if 200 <= resp.status_code < 300:
+                return True
+            else:
+                logger.warning("SendGrid failed, falling back to SMTP")
+
+        except Exception as e:
+            logger.warning("SendGrid error, falling back to SMTP: %s", e)
+
+    # 🔹 Gmail SMTP fallback
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+
+        msg = MIMEText(html, "html")
+        msg["Subject"] = subject
+        msg["From"] = os.environ.get("EMAIL_USER")
+        msg["To"] = to_email
+
+        with smtplib.SMTP(os.environ.get("EMAIL_HOST"), int(os.environ.get("EMAIL_PORT", 587))) as server:
+            server.starttls()
+            server.login(
+                os.environ.get("EMAIL_USER"),
+                os.environ.get("EMAIL_PASS")
+            )
+            server.send_message(msg)
+
+        logger.info("SMTP email sent to=%s", to_email)
+        return True
+
+    except Exception as e:
+        logger.exception("SMTP email failed: %s", e)
+        return False
 
 def teacher_approved(name: str, employee_id: str, default_password: str) -> str:
     return f"""
