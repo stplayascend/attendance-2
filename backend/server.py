@@ -48,8 +48,8 @@ bearer = HTTPBearer(auto_error=False)
 JWT_ALGO = "HS256"
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-please-32-chars-minimum-xxx")
 
-ADMIN_ID = "adminpannel"
-ADMIN_PASSWORD = "abcd1234"
+ADMIN_ID = "ADMIN"
+ADMIN_PASSWORD = "12345"
 DEFAULT_TEACHER_PASSWORD = "Teacher@123"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
