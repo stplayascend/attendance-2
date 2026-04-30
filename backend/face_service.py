@@ -13,7 +13,7 @@ import cv2
 from PIL import Image, ImageOps
 
 _FACE_APP = None
-_DET_SIZE = (1024, 1024)  # larger than default for classroom group photos
+_DET_SIZE = (640, 640)  # larger than default for classroom group photos
 
 logger = logging.getLogger("face")
 
