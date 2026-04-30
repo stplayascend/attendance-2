@@ -41,6 +41,7 @@ def _b64_to_bgr(b64: str) -> np.ndarray:
     # Fix phone-camera EXIF rotation (portrait photos often come sideways).
     img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
+    img = img.resize((640, 480))
     arr = np.array(img)
     return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
 
