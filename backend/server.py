@@ -671,17 +671,24 @@ async def export_csv(session_id: str, user: dict = Depends(require_teacher)):
     rows = await db.attendance.find({"session_id": session_id}, {"_id": 0}).to_list(5000)
     ids = [r["student_id"] for r in rows]
     students = await db.students.find(
-        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "usn": 1}
+        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "usn": 1, "roll_number": 1}
     ).to_list(5000)
     smap = {s["id"]: s for s in students}
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Student Name", "USN", "Date", "Session", "Status"])
+    w.writerow(["Roll Number", "Student Name", "USN", "Date", "Session", "Status"])
     label = f"{sess['lecture']} ({sess['time_from']}-{sess['time_to']})"
     for r in rows:
         s = smap.get(r["student_id"], {})
-        w.writerow([s.get("name", ""), s.get("usn", ""), r["date"], label, r["status"].upper()])
+        w.writerow([
+        s.get("roll_number", ""),   # 🔥 THIS IS WHAT YOU WANT
+        s.get("name", ""),
+        s.get("usn", ""),
+        r["date"],
+        label,
+        r["status"].upper()
+    ])
 
     filename = f"attendance_{sess['lecture'].replace(' ', '_')}_{sess['date']}.csv"
     return Response(
