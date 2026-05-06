@@ -140,11 +140,15 @@ class StudentRegister(BaseModel):
     password: str
 
 
+class CourseItem(BaseModel):
+    name: str
+    code: str
+
 class TeacherRegisterRequest(BaseModel):
     employee_id: str
     name: str
     email: EmailStr
-    courses: List[str]
+    courses: List[CourseItem]      # [{name, code}, ...]
     id_photo_base64: str
 
 
@@ -155,7 +159,8 @@ class FaceUpload(BaseModel):
 class SessionCreate(BaseModel):
     semester: str
     division: str
-    lecture: str
+    lecture: str           # course name
+    course_code: str = ""  # NEW
     time_from: str
     time_to: str
     branch: Optional[str] = ""
@@ -200,7 +205,7 @@ class ResetConfirm(BaseModel):
 
 
 class UpdateCourses(BaseModel):
-    courses: List[str]
+    courses: List[CourseItem]   # [{name, code}, ...]
 
 
 # --- WebSocket manager ---
@@ -316,11 +321,15 @@ async def register_teacher_request(payload: TeacherRegisterRequest):
     if await db.teachers.find_one({"employee_id": emp_id}):
         raise HTTPException(400, "Employee ID already registered or pending")
     tid = str(uuid.uuid4())
-    courses = [c.strip() for c in payload.courses if c.strip()]
+    courses = [
+        {"name": c.name.strip(), "code": c.code.strip().upper()}
+        for c in payload.courses if c.name.strip()
+    ]
     await db.teachers.insert_one({
         "id": tid, "employee_id": emp_id,
         "name": payload.name, "email": payload.email.lower(),
         "courses": courses,
+
         "id_photo_base64": payload.id_photo_base64,
         "status": "pending", "password_hash": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -482,13 +491,17 @@ async def teachers_me(user: dict = Depends(require_teacher)):
 
 @api.put("/teachers/me/courses")
 async def update_my_courses(payload: UpdateCourses, user: dict = Depends(require_teacher)):
-    courses = [c.strip() for c in payload.courses if c.strip()]
+    courses = [
+        {"name": c.name.strip(), "code": c.code.strip().upper()}
+        for c in payload.courses if c.name.strip()
+    ]
     await db.teachers.update_one(
         {"id": user["id"]},
         {"$set": {"courses": courses,
                   "updated_at": datetime.now(timezone.utc).isoformat()}},
     )
     return {"ok": True, "courses": courses}
+
 
 
 @api.post("/sessions")
@@ -498,7 +511,9 @@ async def create_session(payload: SessionCreate, user: dict = Depends(require_te
         "id": sid,
         "teacher_id": user["id"], "teacher_name": user["name"],
         "semester": payload.semester, "division": payload.division,
-        "lecture": payload.lecture, "branch": payload.branch or "",
+        "lecture": payload.lecture,
+        "course_code": (payload.course_code or "").strip().upper(),
+        "branch": payload.branch or "",
         "time_from": payload.time_from, "time_to": payload.time_to,
         "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "status": "open", "attendance": [],
@@ -663,39 +678,112 @@ async def save_attendance(
     return {"ok": True, "saved": len(rows)}
 
 
+def _csv_for_sessions(sessions: List[dict], rows_by_session: Dict[str, list],
+                     students_map: Dict[str, dict]) -> str:
+    """Build CSV: a header block per session, then 'Roll No, Status' rows."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    for i, sess in enumerate(sessions):
+        if i > 0:
+            w.writerow([])  # blank separator
+        # First row = metadata
+        w.writerow([
+            "Course Name", "Course Code", "Date",
+            "Time From-To", "Semester", "Division",
+        ])
+        w.writerow([
+            sess.get("lecture", ""),
+            sess.get("course_code", ""),
+            sess.get("date", ""),
+            f"{sess.get('time_from','')}-{sess.get('time_to','')}",
+            sess.get("semester", ""),
+            sess.get("division", ""),
+        ])
+        w.writerow([])  # blank line between meta and roster
+        w.writerow(["Roll Number", "Status"])
+        rows = rows_by_session.get(sess["id"], [])
+        # sort by roll number
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: students_map.get(r["student_id"], {}).get("roll_number", "")
+        )
+        for r in rows_sorted:
+            stud = students_map.get(r["student_id"], {})
+            w.writerow([
+                stud.get("roll_number", ""),
+                r["status"].upper(),
+            ])
+    return buf.getvalue()
+
+
 @api.get("/sessions/{session_id}/export")
 async def export_csv(session_id: str, user: dict = Depends(require_teacher)):
-    sess = await db.sessions.find_one({"id": session_id, "teacher_id": user["id"]})
+    sess = await db.sessions.find_one(
+        {"id": session_id, "teacher_id": user["id"]}, {"_id": 0}
+    )
     if not sess:
         raise HTTPException(404, "Session not found")
-    rows = await db.attendance.find({"session_id": session_id}, {"_id": 0}).to_list(5000)
+    rows = await db.attendance.find(
+        {"session_id": session_id}, {"_id": 0}
+    ).to_list(5000)
     ids = [r["student_id"] for r in rows]
     students = await db.students.find(
-        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "usn": 1, "roll_number": 1}
+        {"id": {"$in": ids}},
+        {"_id": 0, "id": 1, "name": 1, "usn": 1, "roll_number": 1},
     ).to_list(5000)
     smap = {s["id"]: s for s in students}
 
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["Roll Number", "Student Name", "USN", "Date", "Session", "Status"])
-    label = f"{sess['lecture']} ({sess['time_from']}-{sess['time_to']})"
-    for r in rows:
-        s = smap.get(r["student_id"], {})
-        w.writerow([
-        s.get("roll_number", ""),   # 🔥 THIS IS WHAT YOU WANT
-        s.get("name", ""),
-        s.get("usn", ""),
-        r["date"],
-        label,
-        r["status"].upper()
-    ])
-
-    filename = f"attendance_{sess['lecture'].replace(' ', '_')}_{sess['date']}.csv"
+    csv_text = _csv_for_sessions([sess], {sess["id"]: rows}, smap)
+    safe = sess["lecture"].replace(" ", "_")
+    filename = f"attendance_{safe}_{sess['date']}.csv"
     return Response(
-        content=buf.getvalue(), media_type="text/csv",
+        content=csv_text, media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
+class ExportMergedRequest(BaseModel):
+    session_ids: List[str]
+
+
+@api.post("/sessions/export-merged")
+async def export_merged_csv(payload: ExportMergedRequest,
+                            user: dict = Depends(require_teacher)):
+    if not payload.session_ids:
+        raise HTTPException(400, "No sessions selected")
+
+    sessions = await db.sessions.find(
+        {"id": {"$in": payload.session_ids}, "teacher_id": user["id"]},
+        {"_id": 0},
+    ).to_list(500)
+    if not sessions:
+        raise HTTPException(404, "No matching sessions")
+
+    # keep order of selection
+    order = {sid: i for i, sid in enumerate(payload.session_ids)}
+    sessions.sort(key=lambda s: order.get(s["id"], 9999))
+
+    rows = await db.attendance.find(
+        {"session_id": {"$in": [s["id"] for s in sessions]}}, {"_id": 0}
+    ).to_list(20000)
+
+    rows_by_session: Dict[str, list] = {}
+    for r in rows:
+        rows_by_session.setdefault(r["session_id"], []).append(r)
+
+    student_ids = list({r["student_id"] for r in rows})
+    students = await db.students.find(
+        {"id": {"$in": student_ids}},
+        {"_id": 0, "id": 1, "name": 1, "usn": 1, "roll_number": 1},
+    ).to_list(20000)
+    smap = {s["id"]: s for s in students}
+
+    csv_text = _csv_for_sessions(sessions, rows_by_session, smap)
+    filename = f"attendance_merged_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=csv_text, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 # ======================================================================
 # ADMIN
