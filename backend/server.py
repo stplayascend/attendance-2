@@ -680,17 +680,14 @@ async def save_attendance(
 
 def _csv_for_sessions(sessions: List[dict], rows_by_session: Dict[str, list],
                      students_map: Dict[str, dict]) -> str:
-    """Build CSV: a header block per session, then 'Roll No, Status' rows."""
+    """Build CSV: metadata block per session, then Present/Absent rows with comma-separated roll numbers."""
     buf = io.StringIO()
     w = csv.writer(buf)
     for i, sess in enumerate(sessions):
         if i > 0:
-            w.writerow([])  # blank separator
-        # First row = metadata
-        w.writerow([
-            "Course Name", "Course Code", "Date",
-            "Time From-To", "Semester", "Division",
-        ])
+            w.writerow([])  # blank separator between sessions
+        # Metadata header + values
+        w.writerow(["Course Name", "Course Code", "Date", "Time From-To", "Semester", "Division"])
         w.writerow([
             sess.get("lecture", ""),
             sess.get("course_code", ""),
@@ -700,19 +697,25 @@ def _csv_for_sessions(sessions: List[dict], rows_by_session: Dict[str, list],
             sess.get("division", ""),
         ])
         w.writerow([])  # blank line between meta and roster
-        w.writerow(["Roll Number", "Status"])
+
         rows = rows_by_session.get(sess["id"], [])
-        # sort by roll number
         rows_sorted = sorted(
             rows,
             key=lambda r: students_map.get(r["student_id"], {}).get("roll_number", "")
         )
-        for r in rows_sorted:
-            stud = students_map.get(r["student_id"], {})
-            w.writerow([
-                stud.get("roll_number", ""),
-                r["status"].upper(),
-            ])
+
+        present_rolls = [
+            students_map.get(r["student_id"], {}).get("roll_number", "")
+            for r in rows_sorted if r["status"] == "present"
+        ]
+        absent_rolls = [
+            students_map.get(r["student_id"], {}).get("roll_number", "")
+            for r in rows_sorted if r["status"] == "absent"
+        ]
+
+        w.writerow(["Status", "Roll Numbers"])
+        w.writerow(["Present"] + present_rolls)
+        w.writerow(["Absent"] + absent_rolls)
     return buf.getvalue()
 
 
