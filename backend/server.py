@@ -714,8 +714,8 @@ def _csv_for_sessions(sessions: List[dict], rows_by_session: Dict[str, list],
         ]
 
         w.writerow(["Status", "Roll Numbers"])
-w.writerow(["Present", ", ".join(present_rolls)])
-w.writerow(["Absent", ", ".join(absent_rolls)])
+w.writerow(["Present", " ,".join(str(r) for r in present_rolls)])
+w.writerow(["Absent", " ,".join(str(r) for r in absent_rolls)])
     return buf.getvalue()
 
 
